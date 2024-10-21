@@ -644,7 +644,7 @@ async def send_excel_report(context: ContextTypes.DEFAULT_TYPE):
     set_group_start_status(group_chat_id, False)
     # Gửi thông báo yêu cầu lệnh "bắt đầu"
     await context.bot.send_message(chat_id=group_chat_id, 
-                                   text="请发送"开始"或"bắt đầu"命令以开始新的记录。\nVui lòng gửi lệnh 'bắt đầu' hoặc '开始' để bắt đầu ghi chép mới.")
+                                   text='请发送"开始"或"bắt đầu"命令以开始新的记录。\nVui lòng gửi lệnh "bắt đầu" hoặc "开始" để bắt đầu ghi chép mới.')
 
     print(f"Đã gửi xong báo cáo Excel, xóa các file và yêu cầu lệnh bắt đầu vào lúc {datetime.now()}")
 
