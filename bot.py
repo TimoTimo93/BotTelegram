@@ -687,7 +687,7 @@ def setup_daily_job(application):
         return
 
     vietnam_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-    report_time = time(hour=1, minute=31, tzinfo=vietnam_tz)
+    report_time = time(hour=23, minute=0, tzinfo=vietnam_tz)
 
     job_queue.run_daily(send_excel_report, time=report_time, name='daily_report')
 
