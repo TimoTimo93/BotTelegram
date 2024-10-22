@@ -682,6 +682,52 @@ def setup_daily_job(application):
     job_queue.run_daily(send_excel_report, time=report_time, name='daily_report')
     job_queue.run_daily(delete_old_files, time=report_time, name='delete_old_files')
 
+# Thêm hàm mới để xử lý lệnh help
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_name = update.message.from_user.first_name
+    help_text = f"""
+用户 {user_name} 查询的机器人使用方法如下：
+
+------------------------
+
+【注意】
+
+每一天，您需要在群内发送"开始"才能开始记账。记账数据将在越南时间晚上11点重置。
+
+------------------------
+
+【入款和下发】
+
+例如在群内发送：
+
+入款 1000
+代表入款统计中增加 1000 的金额。
+
+下发 2000
+代表下发 2000 的金额。
+
+您也可以省略「入款」和「下发」的汉字，使用加号「+」代表「入款」，使用减号「-」代表「下发」，例如在群组中发送：
+
++3000
+代表入款统计中增加 3000 的金额。
+
+-4000
+代表下发 4000 的金额。
+
+------------------------
+
+【撤销记账】
+
+在撤销记账时，必须在消息中指明是哪种操作，不可以使用加减号缩略记账的方法，操作示例如下，在群组中发送：
+
+入款 -5000
+代表入款统计中撤销 5000 的金额。
+
+下发 -6000
+代表下发统计中撤销 6000 的金额。
+"""
+    await update.message.reply_text(help_text)
+
 # Hàm main
 def main():
     TOKEN = "7941025829:AAEJmUDK3Jr5cbNpNjeTxIim35LZEmWr2DY"
@@ -693,6 +739,8 @@ def main():
     application.add_handler(CommandHandler("revoke", revoke_permission))
     application.add_handler(CommandHandler("pause_report", pause_daily_report))
     application.add_handler(CommandHandler("resume_report", resume_daily_report))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.Regex(r'^帮助$'), help_command))
 
     setup_daily_job(application)
 
@@ -703,4 +751,3 @@ if __name__ == "__main__":
 
 print(f"Current working directory: {os.getcwd()}")
 print(f"Directory contents: {os.listdir()}")
-
