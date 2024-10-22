@@ -782,7 +782,7 @@ async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 # Hàm main
 def main():
-    TOKEN = "7941025829:AAEJmUDK3Jr5cbNpNjeTxIim35LZEmWr2DY"
+    TOKEN = "7214328196:AAER2RT0zZucmrj0PWoF101x8MOAQ8uGZGM"
     application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start_command))
