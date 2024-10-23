@@ -9,10 +9,26 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue
 import pytz
 from openpyxl import load_workbook, Workbook
+import aiofiles
+from telegram import Bot
 
-# Hàm để kiểm tra và cài đặt hoặc nâng cấp thư viện
-def install_or_upgrade(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", package])
+# Hàm để kiểm tra và cài đặt thư viện
+def install_package(package):
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to install {package}: {e}")
+
+# Kiểm tra và cài đặt aiofiles nếu chưa có
+try:
+    import aiofiles
+except ImportError:
+    print("aiofiles chưa được cài đặt. Đang cài đặt...")
+    install_package('aiofiles')
+    try:
+        import aiofiles
+    except ImportError:
+        print("Không thể cài đặt aiofiles. Vui lòng kiểm tra quyền truy cập và môi trường Python.")
 
 # Danh sách các thư viện cần thiết
 required_packages = [
@@ -33,7 +49,7 @@ def check_and_install_packages():
         package_name = package.split('[')[0].lower()
         if package_name not in installed_packages:
             print(f"Đang cài đặt {package}...")
-            install_or_upgrade(package)
+            install_package(package)
 
 # Gọi hàm kiểm tra và cài đặt thư viện
 check_and_install_packages()
@@ -46,7 +62,7 @@ try:
     import nest_asyncio
 except ImportError:
     print("Nest_asyncio chưa được cài đặt. Đang cài đặt...")
-    install_or_upgrade('nest_asyncio')
+    install_package('nest_asyncio')
     import nest_asyncio  # Thử lại sau khi cài đặt
 
 nest_asyncio.apply()
@@ -86,30 +102,30 @@ def save_data(data, file_name):
         json.dump(data, file)
 
 # Hàm để load danh sách người dùng được ủy quyền cho một nhóm cụ thể
-def load_authorized_users(chat_id):
-    return load_group_data(authorized_users_file, chat_id)
+async def load_authorized_users(chat_id):
+    return await load_group_data(authorized_users_file, chat_id)
 
 # Hàm để lưu danh sách người dùng được ủy quyền cho một nhóm cụ thể
-def save_authorized_users(authorized_users, chat_id):
-    save_group_data(authorized_users, authorized_users_file, chat_id)
+async def save_authorized_users(authorized_users, chat_id):
+    await save_group_data(authorized_users, authorized_users_file, chat_id)
 
 # Hàm kiểm tra xem người dùng có quyền hay không
-def is_user_authorized(user_id, chat_id):
-    authorized_users = load_authorized_users(chat_id)
+async def is_user_authorized(user_id, chat_id):
+    authorized_users = await load_authorized_users(chat_id)
     return str(user_id) in authorized_users
 
 # Hàm cấp quyền cho người dùng
-def authorize_user(user_id, chat_id):
-    authorized_users = load_authorized_users(chat_id)
+async def authorize_user(user_id, chat_id):
+    authorized_users = await load_authorized_users(chat_id)
     authorized_users[str(user_id)] = True
-    save_authorized_users(authorized_users, chat_id)
+    await save_authorized_users(authorized_users, chat_id)
 
 # Hàm hủy quyền của người dùng
-def unauthorize_user(user_id, chat_id):
-    authorized_users = load_authorized_users(chat_id)
+async def unauthorize_user(user_id, chat_id):
+    authorized_users = await load_authorized_users(chat_id)
     if str(user_id) in authorized_users:
         del authorized_users[str(user_id)]
-    save_authorized_users(authorized_users, chat_id)
+    await save_authorized_users(authorized_users, chat_id)
 
 # Hàm kiểm tra xem người dùng có phải là chủ nhóm không
 async def is_user_owner(chat, user_id):
@@ -135,36 +151,33 @@ def is_revocation_request(text):
 
 lock = asyncio.Lock()
 
-# Hàm để load dữ liệu từ file cho một nhóm cụ thể
-def load_group_data(file_name, chat_id):
+# Hàm không đồng bộ để load dữ liệu từ file
+async def load_group_data(file_name, chat_id):
+    full_file_name = f'{chat_id}_{file_name}'
     try:
-        full_file_name = f'{chat_id}_{file_name}'
-        # print(f"Loading data from {full_file_name}")  # Bình luận dòng này để không in ra thông báo
-        with open(full_file_name, 'r') as file:
-            return json.load(file)
+        async with aiofiles.open(full_file_name, 'r') as file:
+            return json.loads(await file.read())
     except FileNotFoundError:
-        # print(f"File not found: {full_file_name}")  # Bình luận dòng này để không in ra thông báo
         return {}
 
-# Hàm để lưu dữ liệu vào file cho một nhóm cụ thể
-def save_group_data(data, file_name, chat_id):
+# Hàm không đồng bộ để lưu dữ liệu vào file
+async def save_group_data(data, file_name, chat_id):
     full_file_name = f'{chat_id}_{file_name}'
-    # print(f"Saving data to {full_file_name}")  # Bình luận dòng này để không in ra thông báo
-    with open(full_file_name, 'w') as file:
-        json.dump(data, file)
+    async with aiofiles.open(full_file_name, 'w') as file:
+        await file.write(json.dumps(data))
 
 # Sử dụng các hàm này trong các hàm xử lý dữ liệu
 async def update_balance_and_transaction(user_id, amount, user_name, now, chat_id):
     async with lock:
         # Cập nhật số dư
-        balance_data = load_group_data(data_file, chat_id)
+        balance_data = await load_group_data(data_file, chat_id)
         if str(user_id) not in balance_data:
             balance_data[str(user_id)] = 0
         balance_data[str(user_id)] += amount
-        save_group_data(balance_data, data_file, chat_id)
+        await save_group_data(balance_data, data_file, chat_id)
 
         # Cập nhật lịch sử giao dịch
-        transaction_history = load_group_data(transaction_file, chat_id)
+        transaction_history = await load_group_data(transaction_file, chat_id)
         if str(user_id) not in transaction_history:
             transaction_history[str(user_id)] = []
         
@@ -176,7 +189,7 @@ async def update_balance_and_transaction(user_id, amount, user_name, now, chat_i
             "time": now,
             "amount": amount
         })
-        save_group_data(transaction_history, transaction_file, chat_id)
+        await save_group_data(transaction_history, transaction_file, chat_id)
         # print(f"Transaction history updated for chat_id: {chat_id}")  # Bình luận dòng này
 
 # Thay thế các hàm liên quan đến việc lưu và đọc ID nhóm chat
@@ -219,38 +232,134 @@ def set_group_start_status(chat_id, status):
 def is_group_started(chat_id):
     return group_started_status.get(chat_id, False)
 
-# Handler để xử lý tin nhắn và lưu ID nhóm chat
+# Định nghĩa hàm kiểm tra quyền chủ nhóm cho bất kỳ nhóm nào
+async def is_user_owner_of_any_group(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    for group_chat_id in get_all_group_chat_ids():
+        try:
+            group_chat = await context.bot.get_chat(group_chat_id)
+            if await is_user_owner(group_chat, user_id):
+                return True
+        except Exception as e:
+            print(f"Lỗi khi kiểm tra quyền chủ nhóm cho nhóm {group_chat_id}: {e}")
+    return False
+
+# Định nghĩa hàm help_command
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    user_id = update.message.from_user.id
+    
+    # Kiểm tra nếu tin nhắn là từ một cuộc trò chuyện riêng tư
+    if chat.type == 'private':
+        # Chỉ kiểm tra xem người dùng có phải là chủ của bất kỳ nhóm nào không
+        is_owner = await is_user_owner_of_any_group(context, user_id)
+        if not is_owner:
+            return  # Bỏ qua nếu không phải là chủ nhóm
+    else:
+        # Kiểm tra xem người dùng có phải là chủ nhóm hoặc có quyền được cấp không
+        is_owner = await is_user_owner(chat, user_id)
+        is_authorized = await is_user_authorized(user_id, chat.id)
+
+        # Nếu không phải chủ nhóm và không có quyền, không trả lời
+        if not is_owner and not is_authorized:
+            return
+
+    user_name = update.message.from_user.first_name
+    common_help_text = f"""
+    用户 {user_name} 查询的机器人使用方法如下：
+
+    ------------------------
+
+    【注意】
+
+    每一天，您需要在群内发送"开始"才能开始记账。记账数据将在越南时间晚上11点重置。
+
+    ------------------------
+
+    【入款和下发】
+
+    例如在群内发送：
+
+    入款 1000
+    代表入款统计中增加 1000 的金额。
+
+    下发 2000
+    代表下发 2000 的金额。
+
+    您也可以省略「入款」和「下发」的汉字，使用加号「+」代表「入款」，使用减号「-」代表「下发」，例如在群组中发送：
+
+    +3000
+    代表入款统计中增加 3000 的金额。
+
+    -4000
+    代表下发 4000 的金额。
+
+    ------------------------
+
+    【撤销记账】
+
+    在撤销记账时，必须在消息中指明是哪种操作，不可以使用加减号缩略记账的方法，操作示例如下，在群组中发送：
+
+    入款 -5000
+    代表入款统计中撤销 5000 的金额
+
+    下发 -6000
+    代表下发统计中撤 6000 的金额。
+    """
+
+    owner_help_text = """
+    ------------------------
+
+    【授权人员】
+
+    请以【授权，给权限，报权限，cấp quyền】这四个字回复某个人员在群里的发言，这样可以将机器人记账权限授权给该人员，使其有权限进行记账。注意，您需要将该命令以「回复某人消息」的方式在群组中发送：
+
+    授权
+
+    ------------------------
+
+    【取消授权】
+
+    请以【撤销权限，取消授权，hủy quyền】这四个字回复某个人员在群里的发言，这样可以取消某人的记账权限。注意，您需要将该命令以「回复某人消息」的方式在群组中发送：
+    取消授权
+    """
+
+    # Gửi phần hướng dẫn chung cho tất cả người dùng có quyền
+    await update.message.reply_text(common_help_text)
+
+    # Nếu là chủ nhóm, gửi thêm phần hướng dẫn đặc biệt
+    if is_owner:
+        await update.message.reply_text(owner_help_text)
+
+# Định nghĩa hàm handle_message
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        chat_id = update.effective_chat.id
-        user_id = update.message.from_user.id
         chat = update.effective_chat
- 
-        # Kiểm tra nếu tin nhắn là từ một cuộc trò chuyện riêng tư
+        user_id = update.message.from_user.id
+        text = update.message.text.strip().lower()
+
+        # Xử lý trường hợp đặc biệt cho tin nhắn riêng tư
         if chat.type == 'private':
-            # Kiểm tra nếu người gửi không phải là chủ nhóm
-            if not await is_user_owner(chat, user_id):
-                # print(f"Tin nhắn từ {user_id} bị chặn vì không phải là chủ nhóm.")  # Bình luận dòng này
-                return  # Không xử lý tin nhắn
- 
-        # Tiếp tục xử lý các tin nhắn khác
-        # print(f"Handling message for chat_id: {chat_id}")  # Bình luận dòng này
-        check_and_save_group_chat_id(chat_id)
+            is_owner = await is_user_owner_of_any_group(context, user_id)
+            if is_owner and text in ['help', '帮助', 'trợ giúp']:
+                await help_command(update, context)
+            return  # Không xử lý các tin nhắn riêng tư khác
+
+        # Tiếp tục xử lý các tin nhắn từ nhóm
+        chat_id = chat.id
         user_name = update.message.from_user.first_name
-        text = update.message.text.strip()
- 
-        # print(f"Message from user {user_name} (ID: {user_id}): {text}")  # Bình luận dòng này
- 
-        # Kiểm tra nếu tin nhắn là lệnh "Bắt đầu"
-        if text.lower() in ["bắt đầu", "开始"]:
-            if await is_user_owner(chat, user_id) or is_user_authorized(user_id, chat_id):
+
+        check_and_save_group_chat_id(chat_id)
+
+        # Kiểm tra nếu tin nhắn là lệnh "bắt đầu"
+        if text in ["bắt đầu", "开始"]:
+            if await is_user_owner(chat, user_id) or await is_user_authorized(user_id, chat_id):
                 set_group_start_status(chat_id, True)
                 await update.message.reply_text("设置成功：开始")
             else:
                 await update.message.reply_text("您没有权限执行此操作。")
             return
- 
-        # Kiểm tra xem nhóm đã gửi lệnh "Bắt đầu" chưa
+
+        # Kiểm tra xem nhóm đã gửi lệnh "bắt đầu" chưa
         if not is_group_started(chat_id):
             await update.message.reply_text(
                 "状态：记账失败！\n"
@@ -258,23 +367,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "提示：如需记账，请您发送「开始」二字。"
             )
             return
- 
+
         # Kiểm tra xem người dùng có quyền không
-        if not await is_user_owner(chat, user_id) and not is_user_authorized(user_id, chat_id):
+        if not await is_user_owner(chat, user_id) and not await is_user_authorized(user_id, chat_id):
             # Kiểm tra nếu tin nhắn là lệnh cộng tiền, trừ tiền hoặc cấp quyền
             if text.startswith('+') or text.startswith('-') or text.startswith("入款 -") or text.startswith("下发 -"):
                 await update.message.reply_text("您没有权限执行此操作。")
                 return
- 
+
         # Kiểm tra nếu là câu cấp quyền
         if update.message.reply_to_message and is_authorization_request(text):
             target_user = update.message.reply_to_message.from_user
             target_user_id = target_user.id
             target_user_name = target_user.username or target_user.first_name
-            if not await is_user_owner(chat, user_id) and not is_user_authorized(user_id, chat_id):
+            if not await is_user_owner(chat, user_id) and not await is_user_authorized(user_id, chat_id):
                 await update.message.reply_text("您没有权限执行此操作。")
                 return
-            authorize_user(target_user_id, chat_id)
+            await authorize_user(target_user_id, chat_id)
             await update.message.reply_text(f"已授予用户 {target_user_name} 权限。")
             return
 
@@ -283,10 +392,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             target_user = update.message.reply_to_message.from_user
             target_user_id = target_user.id
             target_user_name = target_user.username or target_user.first_name
-            if not await is_user_owner(chat, user_id) and not is_user_authorized(user_id, chat_id):
+            if not await is_user_owner(chat, user_id) and not await is_user_authorized(user_id, chat_id):
                 await update.message.reply_text("您没有权限执行此操作。")
                 return
-            unauthorize_user(target_user_id, chat_id)
+            await unauthorize_user(target_user_id, chat_id)
             await update.message.reply_text(f"已撤销用户 {target_user_name} 的权限。")
             return
 
@@ -304,12 +413,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 # Xuất file Excel
                 group_chat_id = update.effective_chat.id
                 excel_file_name = f'{group_chat_id}.xlsx'
-                export_to_excel(group_chat_id)  # Chỉ truyền group_chat_id, không phải excel_file_name
+                await export_to_excel(group_chat_id)  # Chỉ truyền group_chat_id, không phải excel_file_name
 
                 # Gửi báo cáo tổng kết
                 await send_summary(update, chat_id)
             except ValueError:
-                await update.message.reply_text("Vui lòng nhập số tiền hợp lệ.")
+                await update.message.reply_text("Vui lng nhập số tiền hợp lệ.")
 
         elif text.startswith("入款 -") or text.startswith("下发 -"):
             parts = text.split()
@@ -333,7 +442,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             # Xuất file Excel
             group_chat_id = update.effective_chat.id
             excel_file_name = f'{group_chat_id}.xlsx'
-            export_to_excel(group_chat_id)  # Chỉ truyền group_chat_id, không phải excel_file_name
+            await export_to_excel(group_chat_id)  # Chỉ truyền group_chat_id, không phải excel_file_name
 
             # Gửi báo cáo tổng kết
             await send_summary(update, chat_id)
@@ -360,7 +469,7 @@ async def grant_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         target_user = await context.bot.get_chat_member(chat.id, target_user_id)
         target_user_name = target_user.user.username or target_user.user.first_name  # Lấy username hoặc tên nu không có username
 
-        authorize_user(target_user_id, chat_id)
+        await authorize_user(target_user_id, chat_id)
         await asyncio.sleep(0.2)
         await update.message.reply_text(f"已授予用户 {target_user_name} 权限。")  # Sử dụng tên tài khoản mục tiêu
     else:
@@ -385,7 +494,7 @@ async def revoke_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         target_user = await context.bot.get_chat_member(chat.id, target_user_id)
         target_user_name = target_user.user.username or target_user.user.first_name
 
-        unauthorize_user(target_user_id, chat_id)
+        await unauthorize_user(target_user_id, chat_id)
         await asyncio.sleep(0.2)
         await update.message.reply_text(f"已撤销用户 {target_user_name} 的权限。")  # Sử dụng tên tài khoản mục tiêu
     else:
@@ -395,7 +504,7 @@ async def revoke_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 # Hàm gửi báo cáo tổng kết
 async def send_summary(update: Update, chat_id):
-    transaction_history = load_group_data(transaction_file, chat_id)
+    transaction_history = await load_group_data(transaction_file, chat_id)
     deposits = []
     withdrawals = []
     total_deposit = 0
@@ -457,8 +566,8 @@ def get_saved_group_chat_id():
         return None
 
 # Hàm xuất báo cáo ra file Excel theo định dạng yêu cầu
-def export_to_excel(chat_id):
-    transactions = load_group_data('transaction_history.json', chat_id)
+async def export_to_excel(chat_id):
+    transactions = await load_group_data('transaction_history.json', chat_id)
 
     if not transactions:
         print("No transactions found for chat_id:", chat_id)
@@ -567,7 +676,7 @@ def export_to_excel(chat_id):
 async def send_daily_report(context):
     for group_chat_id in get_all_group_chat_ids():
         excel_file_name = f'{group_chat_id}.xlsx'
-        export_to_excel(group_chat_id)
+        await export_to_excel(group_chat_id)  # Thêm await ở đây
         try:
             with open(excel_file_name, 'rb') as f:
                 await context.bot.send_document(chat_id=group_chat_id, document=f)
@@ -577,8 +686,8 @@ async def send_daily_report(context):
 
 # Hàm đặt lại dữ liệu hàng ngày
 async def reset_data():
-    save_data({}, data_file)  
-    save_data({}, transaction_file)  
+    await save_data({}, data_file)  
+    await save_data({}, transaction_file)  
     print("Dữ liệu đã được đặt lại khi có thay đổi cần thiết.")
 
 # Lệnh bắt đầu ghi chép
@@ -631,7 +740,7 @@ async def send_excel_report(context: ContextTypes.DEFAULT_TYPE):
     for group_chat_id in get_all_group_chat_ids():
         print(f"Đang xử lý nhóm {group_chat_id}")
         excel_file_name = f'{group_chat_id}.xlsx'
-        export_to_excel(group_chat_id)
+        await export_to_excel(group_chat_id)  # Thêm await ở đây
 
         try:
             # Lấy thông tin nhóm
@@ -664,9 +773,9 @@ async def send_excel_report(context: ContextTypes.DEFAULT_TYPE):
         set_group_start_status(group_chat_id, False)
         # Gửi thông báo yêu cầu lệnh "bắt đầu"
         await context.bot.send_message(chat_id=group_chat_id, 
-                                       text='请发送"开始"或"bắt đầu"命令以开始新的记录。\nVui lòng gửi lệnh "bắt đầu" hoặc "开始" để bắt đầu ghi chép mới.')
+                                       text='请发送"开始"或"bắt đầu"命令开始新的记录。\nVui lòng gửi lệnh "bắt đầu" hoặc "开始" để bắt đầu ghi chép mới.')
 
-    print(f"Đã gửi xong báo cáo Excel và xóa các file vào lúc {datetime.now()}")
+    print(f"Đã gửi xong báo cáo Excel và xóa file vào lúc {datetime.now()}")
 
 # Định nghĩa hàm delete_file
 def delete_file(file_name):
@@ -687,89 +796,9 @@ def setup_daily_job(application):
         return
 
     vietnam_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-    report_time = time(hour=23, minute=0, tzinfo=vietnam_tz)
+    report_time = time(hour=18, minute=48, tzinfo=vietnam_tz)
 
     job_queue.run_daily(send_excel_report, time=report_time, name='daily_report')
-
-# Thêm hàm mới để xử lý lệnh help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat = update.effective_chat
-    user_id = update.message.from_user.id
-
-    # Kiểm tra nếu tin nhắn là từ một cuộc trò chuyện riêng tư
-    if chat.type == 'private':
-        # Kiểm tra nếu người dùng là chủ nhóm
-        # Lấy danh sách các nhóm mà người dùng là chủ
-        group_chat_ids = get_all_group_chat_ids()
-        is_owner = False
-        for group_chat_id in group_chat_ids:
-            chat = await context.bot.get_chat(group_chat_id)
-            if await is_user_owner(chat, user_id):
-                is_owner = True
-                break
-
-        if not is_owner:
-            return  # Không trả lời nếu không phải là chủ nhóm
-
-    user_name = update.message.from_user.first_name
-    help_text = f"""
-    用户 {user_name} 查询的机器人使用方法如下：
-
-    ------------------------
-
-    【注意】
-
-    每一天，您需要在群内发送"开始"才能开始记账。记账数据将在越南时间晚上11点重置。
-
-    ------------------------
-
-    【入款和下发】
-
-    例如在群内发送：
-
-    入款 1000
-    代表入款统计中增加 1000 的金额。
-
-    下发 2000
-    代表下发 2000 的金额。
-
-    您也可以省略「入款」和「下发」的汉字，使用加号「+」代表「入款」，使用减号「-」代表「下发」，例如在群组中发送：
-
-    +3000
-    代表入款统计中增加 3000 的金额。
-
-    -4000
-    代表下发 4000 的金额。
-
-    ------------------------
-
-    【撤销记账】
-
-    在撤销记账时，必须在消息中指明是哪种操作，不可以使用加减号缩略记账的方法，操作示例如下，在群组中发送：
-
-    入款 -5000
-    代表入款统计中撤销 5000 的金额。
-
-    下发 -6000
-    代表下发统计中撤销 6000 的金额。
-
-    ------------------------
-        
-    【授权人员】
-
-    请以「授权」二字回复某个人员在群里的发言，这样可以将机器人记账权限授权给该人员，令其有权限进行记账。注意您需要将该命令在群组中以「回复某人消息」的方式发送：
-
-    授权
-
-    ------------------------
-
-    【取消授权】
-
-    请以「取消授权」四字回复某个人员在群里的发言，这样可以取消某人的记账权限。注意您需要将该命令在群组中以「回复某人消息」的方式发送：
-
-    取消授权
-    """
-    await update.message.reply_text(help_text)
 
 # Định nghĩa hàm handle_new_member
 async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -781,8 +810,8 @@ async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("你好！我已准备好开始记录。请发送 '开始' 或 'bắt đầu' 命令以开始。")
 
 # Hàm main
-def main():
-    TOKEN = "7214328196:AAER2RT0zZucmrj0PWoF101x8MOAQ8uGZGM"
+async def main():
+    TOKEN = "7941025829:AAEJmUDK3Jr5cbNpNjeTxIim35LZEmWr2DY"
     application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start_command))
@@ -795,12 +824,11 @@ def main():
     application.add_handler(MessageHandler(filters.Regex(r'^帮助$'), help_command))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_member))
 
-    setup_daily_job(application)
-
-    application.run_polling()
+    setup_daily_job(application)  # Không cần await ở đây
+    await application.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
 
 print(f"Current working directory: {os.getcwd()}")
 print(f"Directory contents: {os.listdir()}")
@@ -812,4 +840,14 @@ if os.path.exists('group_chat_ids.txt'):
         print(f"Nội dung file group_chat_ids.txt: {content}")
 else:
     print("File group_chat_ids.txt không tồn tại")
+
+# Hàm gửi tin nhắn không đồng bộ
+async def send_message(bot: Bot, chat_id: int, text: str):
+    await bot.send_message(chat_id=chat_id, text=text)
+
+# Hàm gửi tài liệu không đồng bộ
+async def send_document(bot: Bot, chat_id: int, document_path: str):
+    async with aiofiles.open(document_path, 'rb') as document:
+        await bot.send_document(chat_id=chat_id, document=document)
+        
 
