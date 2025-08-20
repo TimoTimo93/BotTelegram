@@ -2,7 +2,6 @@
 const fs = require('fs').promises;
 const { google } = require('googleapis');
 const { saveToken, getToken } = require('./database.js');
-const { OAuth2Client } = require('google-auth-library');
 
 const CREDENTIALS_PATH = './credentials.json';
 const SCOPES = [
@@ -20,8 +19,8 @@ async function createOAuthClient() {
 async function getAuthUrl(oAuth2Client, userId) {
     return oAuth2Client.generateAuthUrl({
         access_type: 'offline',
+        prompt: 'consent', // Luôn hỏi lại sự đồng ý để nhận refresh_token
         scope: SCOPES,
-        // Mã hóa userId vào state để nhận lại sau khi xác thực
         state: Buffer.from(JSON.stringify({ userId })).toString('base64')
     });
 }
@@ -34,16 +33,15 @@ async function getTokensFromCode(oAuth2Client, code) {
 async function getAuthenticatedClient(userId) {
     const oAuth2Client = await createOAuthClient();
     const dbToken = await getToken(userId, 'google');
-
     if (dbToken && dbToken.refresh_token) {
         oAuth2Client.setCredentials({
-            refresh_token: dbToken.refresh_token
+            refresh_token: dbToken.refresh_token,
+            access_token: dbToken.access_token,
+            expiry_date: dbToken.expiry_date
         });
-        // Tự động làm mới access_token nếu cần
-        await oAuth2Client.getAccessToken();
         return oAuth2Client;
     }
-    return null; // Trả về null nếu chưa có token
+    return null;
 }
 
-module.exports = { createOAuthClient, getAuthUrl, getTokensFromCode, saveToken, getAuthenticatedClient };
+module.exports = { createOAuthClient, getAuthUrl, getTokensFromCode, getAuthenticatedClient, saveToken };
