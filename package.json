@@ -1,0 +1,16 @@
+{
+  "name": "social-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot to automate social media posting",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Your Name",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.65.1"
+  }
+}
